@@ -4,7 +4,7 @@ from __future__ import unicode_literals
 from django.core.urlresolvers import resolve, reverse
 from django.test import TestCase
 
-from .views import upload
+from .BedFileUploadController import upload
 
 
 class UploadTest(TestCase):

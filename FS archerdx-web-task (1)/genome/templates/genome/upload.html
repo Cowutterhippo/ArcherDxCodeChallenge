@@ -1,6 +1,265 @@
 {% extends "base.html" %}
+{% load staticfiles %}
+{% block stylesheets %}
+{{ block.super }}
+<link rel="stylesheet" type="text/css" href="{% static 'genome/style.css' %}">
+{% endblock %}
+
+
 
 {% block content %}
 <h1>Upload BED File</h1>
-{# TODO: Handle BED uploads #}
+
+<div id="file-uploader">
+    <form enctype="multipart/form-data">
+        <fieldset>
+            <input type="file" id="bedFileForm" multiple>
+        </fieldset>
+    </form>
+</div>
+
+<div id="bed-file-list" class="list-group">
+    {% for bedfile in bedfile_names %}
+    <button type="button" class="list-group-item" id={{ bedfile }} token={{ csrf_token }}>{{ bedfile }}</button>
+    {% endfor %}
+</div>
+{% if bedfile_names.has_other_pages %}
+<ul class="pagination">
+    {% if bedfile_names.has_previous %}
+    <li><a href="?page={{ bedfile_names.previous_page_number }}">&laquo;</a></li>
+    {% else %}
+    <li class="disabled"><span>&laquo;</span></li>
+    {% endif %}
+    {% for i in bedfile_names.paginator.page_range %}
+    {% if bedfile_names.number == i %}
+    <li class="active"><span>{{ i }} <span class="sr-only">(current)</span></span></li>
+    {% else %}
+    <li><a href="?page={{ i }}">{{ i }}</a></li>
+    {% endif %}
+    {% endfor %}
+    {% if bedfile_names.has_next %}
+    <li><a href="?page={{ bedfile_names.next_page_number }}">&raquo;</a></li>
+    {% else %}
+    <li class="disabled"><span>&raquo;</span></li>
+    {% endif %}
+</ul>
+{% endif %}
+
+<div id='charts'>
+</div>
+
+
+{% block javascript %}
+{{ block.super }}
+<script src="{% static 'genome/fileuploader.js' %}"></script>
+<script type="text/javascript">
+
+    function ajaxFileUpload() {
+        var url ="{{ path(genome_views.ajax_uploader) }}";
+        var params :
+            {
+                'formData' : new FormData($(this).parents('form')[0]),
+                'csrf_token':'{{ csrf_token }}',
+            }
+        $.post()
+
+
+    // $(function(){
+    //     var uploader = new qq.FileUploader({
+    //         action: 'http://127.0.0.1:8000/genome/ajax_upload',
+    //         element: $('#file-uploader')[0],
+    //         multiple: true,
+    //         onComplete: function(id, fileName, responseJSON) {
+    //             if(responseJSON.success) {
+    //                 alert("success!");
+    //             } else {
+    //                 alert("upload failed!");
+    //             }
+    //         },
+    //         onAllComplete: function(uploads) {
+    //             // uploads is an array of maps
+    //             // the maps look like this: {file: FileObject, response: JSONServerResponse}
+    //             alert("All complete!");
+    //         },
+    //         params: {
+    //             'csrf_token': '{{ csrf_token }}',
+    //             'csrf_name': 'csrfmiddlewaretoken',
+    //             'csrf_xname': 'X-CSRFToken',
+    //         },
+    //     });
+    // });
+
+    var lis = document.getElementById("bed-file-list").getElementsByTagName('button');
+
+    for (var i=0; i<lis.length; i++) {
+        lis[i].addEventListener('click', doStuff, false);
+    }
+
+    function doStuff() {
+        console.log(this.innerHTML + '  ' + this.getAttribute('token'))
+        $.ajax({
+            url: "/genome/bed_analytics",
+            type: "POST",
+            data: { 'filename' : this.innerHTML , "csrfmiddlewaretoken": this.getAttribute('token') },
+            success: function(response){
+                console.log(response);
+                emptyChartDiv();
+                graphChromCounts(response['chrom_counts']);
+                graphChromDiffs(response['chrom_diffs']);
+            },
+            error: function(){
+                console.log("****Error****");
+            }
+        }) //end ajax
+    };
+
+    var emptyChartDiv = function(){
+        var childnodes = document.getElementById("charts")
+        if (childnodes.childNodes.length > 0){
+            console.log('more than one')
+            while (childnodes.hasChildNodes()) {
+                childnodes.removeChild(childnodes.firstChild);
+            };
+        } else {  console.log('making new chart')
+        }
+    };
+
+    var d3 = Plotly.d3;
+    var WIDTH_IN_PERCENT_OF_PARENT = 60,
+        HEIGHT_IN_PERCENT_OF_PARENT = 80;
+
+    var graphChromCounts = function(o){
+        var chroms = [];
+        var counts = [];
+
+        for (var chrom in o) {
+            chroms.push(chrom);
+            counts.push(o[chrom]);
+        };
+
+        var data = {
+            type: 'bar',
+            x: chroms,
+            y: counts,
+            marker: {
+                color: '#C8A2C8',
+                line: {
+                    width: 2.5
+                }
+            }
+        };
+
+        console.log(data)
+
+        var gd3 = d3.select('#charts')
+            .append('div')
+            .style({
+                width: WIDTH_IN_PERCENT_OF_PARENT + '%',
+                'margin-left': (100 - WIDTH_IN_PERCENT_OF_PARENT) / 2 + '%',
+
+                height: HEIGHT_IN_PERCENT_OF_PARENT + 'vh',
+                'margin-top': (100 - HEIGHT_IN_PERCENT_OF_PARENT) / 2 + 'vh'
+            });
+
+        var gd = gd3.node();
+
+        Plotly.plot(gd,[data], {
+            title : 'Chromosome Frequency' + ' ' + 'filename',
+            font : {
+                size: 16
+            },
+            xaxis : {
+                title : 'Chromosomes Examined',
+                titlefonts : {
+                    size : 16,
+                    color : 'rgb(107, 107, 107)'
+                }
+            },
+            yaxis : {
+                title : 'Frequency',
+                titlefonts : {
+                    size : 16,
+                    color : 'rgb(107, 107, 107)'
+                }
+            },
+            tickfont: {
+                size: 14,
+                color: 'rgb(107, 107, 107)'
+            }
+        });
+
+        window.onresize = function() {
+            Plotly.Plots.resize(gd);
+        }
+    };
+
+    var graphChromDiffs = function(o){
+        var chromss = [];
+        var chrom_diffs = [];
+
+        for (var chrom in o){
+            chromss.push(chrom);
+            chrom_diffs.push(o[chrom]);
+        };
+
+        var data = {
+            type: 'bar',
+            x: chromss,
+            y: chrom_diffs,
+            marker: {
+                color: '#C8A2C8',
+                line: {
+                    width: 2.5
+                }
+            }
+        };
+
+        var gd3 = d3.select('#charts')
+            .append('div')
+            .style({
+                width: WIDTH_IN_PERCENT_OF_PARENT + '%',
+                'margin-left': (100 - WIDTH_IN_PERCENT_OF_PARENT) / 2 + '%',
+
+                height: HEIGHT_IN_PERCENT_OF_PARENT + 'vh',
+                'margin-top': (100 - HEIGHT_IN_PERCENT_OF_PARENT) / 2 + 'vh'
+            });
+
+        var gd = gd3.node();
+
+        Plotly.plot(gd, [data], {
+            title: 'Total Chrom Bedlengths' + ' ' + 'filename',
+            font : {
+                size: 16
+            },
+            xaxis : {
+                title : 'Chromosomes Examined',
+                titlefonts : {
+                    size : 16,
+                    color : 'rgb(107, 107, 107)'
+                }
+            },
+            yaxis : {
+                title : 'Total Track Length',
+                titlefonts : {
+                    size : 16,
+                    color : 'rgb(107, 107, 107)'
+                }
+            },
+            tickfont: {
+                size: 14,
+                color: 'rgb(107, 107, 107)'
+            }
+        });
+
+        window.onresize = function() {
+            Plotly.Plots.resize(gd);
+        };
+
+    };
+
+
+    });
+</script>
+
+{% endblock %}
 {% endblock content %}
